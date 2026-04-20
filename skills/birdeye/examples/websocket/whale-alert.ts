@@ -33,12 +33,10 @@ async function run() {
   const wsUrl = `wss://public-api.birdeye.so/socket/${CHAIN}?x-api-key=${apiKey}`;
 
   function connect(): WebSocket {
-    const ws = new WebSocket(wsUrl, {
-      headers: {
-        'Origin': 'ws://public-api.birdeye.so',
-        'Sec-WebSocket-Protocol': 'echo-protocol',
-      },
-    } as any);
+    // Pass 'echo-protocol' as the subprotocol argument (not as a raw header).
+    const ws = new WebSocket(wsUrl, 'echo-protocol', {
+      headers: { Origin: 'ws://public-api.birdeye.so' },
+    });
 
     ws.on('open', () => {
       console.log(`Connected. Watching for trades > $${MIN_VOLUME_USD.toLocaleString()}...`);

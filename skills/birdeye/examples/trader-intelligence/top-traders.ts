@@ -10,9 +10,9 @@ const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY!;
 
 async function getTopTraders(
   address: string,
-  timeFrame: string = "24h",      // '30m' | '1h' | '2h' | '4h' | '8h' | '24h'
-  sortBy: string = "volume",       // 'volume' | 'trade'
-  sortType: string = "desc",       // 'asc' | 'desc' — required
+  timeFrame: string = "24h",     // '30m'|'1h'|'2h'|'4h'|'6h'|'8h'|'12h'|'24h' (+ '2d'|'3d'|'7d'|'14d'|'30d'|'60d'|'90d' on Solana)
+  sortBy: string = "volume",      // 'volume' | 'trade' | 'total_pnl' | 'unrealized_pnl' | 'realized_pnl' | 'volume_usd' (PnL values Solana-only)
+  sortType: "asc" | "desc" = "desc",  // REQUIRED by /defi/v2/tokens/top_traders
   limit: number = 10
 ): Promise<void> {
   const url = new URL("https://public-api.birdeye.so/defi/v2/tokens/top_traders");
@@ -35,12 +35,15 @@ async function getTopTraders(
   const json = await res.json() as any;
   const traders = json.data?.items ?? [];
 
+  // Response fields (live-verified): owner, tokenAddress, trade, tradeBuy, tradeSell,
+  // volume, volumeBuy, volumeSell, volumeUsd, realizedPnl, unrealizedPnl, totalPnl, tags, type.
   console.log(`=== TOP ${limit} TRADERS (${timeFrame}) ===`);
   traders.forEach((trader: any, i: number) => {
-    console.log(`${i + 1}. ${trader.address}`);
-    console.log(`   Volume: $${trader.volume?.toFixed(2)}`);
-    console.log(`   Trades: ${trader.tradingCount}`);
-    console.log(`   Tags: ${trader.tags?.join(", ") || "none"}`);
+    console.log(`${i + 1}. ${trader.owner}`);
+    console.log(`   Volume:    ${trader.volume?.toFixed(2)} (USD: $${trader.volumeUsd?.toLocaleString(undefined, { maximumFractionDigits: 0 })})`);
+    console.log(`   Trades:    ${trader.trade} (buy: ${trader.tradeBuy}, sell: ${trader.tradeSell})`);
+    console.log(`   Realized:  $${trader.realizedPnl?.toFixed(2)}`);
+    console.log(`   Tags:      ${trader.tags?.join(", ") || "none"}`);
   });
 }
 

@@ -1,5 +1,5 @@
 /**
- * Live Price Stream via WebSocket — Birdeye wss://public-api.birdeye.so/socket/{chain}
+ * Live Price Stream via WebSocket — Birdeye wss://public-api.birdeye.so/socket
  *
  * Subscribes to real-time 1H OHLCV candle updates for a token.
  * Press Ctrl+C to stop.
@@ -30,14 +30,11 @@ async function run() {
     const chain   = process.env.BIRDEYE_CHAIN || 'solana';
 
     // CRITICAL: API key goes in the WS URL query string — not as a header.
-    // Chain path segment and handshake headers are required.
+    // Birdeye requires the chain path segment and `echo-protocol` subprotocol.
     const wsUrl = `wss://public-api.birdeye.so/socket/${chain}?x-api-key=${encodeURIComponent(apiKey)}`;
-    const ws = new WebSocket(wsUrl, {
-        headers: {
-            'Origin': 'ws://public-api.birdeye.so',
-            'Sec-WebSocket-Protocol': 'echo-protocol',
-        },
-    } as any);
+    const ws = new WebSocket(wsUrl, 'echo-protocol', {
+        headers: { Origin: 'ws://public-api.birdeye.so' },
+    });
 
     ws.on('open', () => {
         console.log(`✅ Connected. Subscribing to 1H price stream for ${address}...`);
@@ -67,7 +64,7 @@ async function run() {
     ws.on('error', (err) => console.error('[WS Error]', err.message));
     ws.on('close', (code) => console.log(`\nConnection closed — code ${code}`));
 
-    // Graceful shutdown on Ctrl+C
+    // Graceful shutdown on Ctrl+C. Unsubscribe has no `data` wrapper.
     process.on('SIGINT', () => {
         console.log('\nUnsubscribing...');
         ws.send(JSON.stringify({ type: 'UNSUBSCRIBE_PRICE' }));

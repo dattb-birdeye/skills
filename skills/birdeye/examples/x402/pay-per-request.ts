@@ -87,13 +87,14 @@ async function run() {
     console.log('2. BONK overview:');
     const overview = await get(fetchFn, '/defi/token_overview', { address: BONK });
     console.log(`   MC: $${(overview.marketCap / 1e6).toFixed(1)}M`);
-    console.log(`   24h vol: $${(overview.volume24h / 1e6).toFixed(1)}M`);
+    console.log(`   24h vol: $${(overview.v24hUSD / 1e6).toFixed(1)}M`);
     console.log(`   Holders: ${overview.holder?.toLocaleString()}\n`);
 
     // 3. Token security — /x402/defi/token_security
     console.log('3. BONK security:');
     const sec = await get(fetchFn, '/defi/token_security', { address: BONK });
-    console.log(`   Mintable: ${sec.mintable}`);
+    console.log(`   Mintable: ${Boolean(sec.isMintable)}`);
+    console.log(`   Freezeable: ${Boolean(sec.freezeable)}`);
     console.log(`   Creator %: ${(sec.creatorPercentage * 100).toFixed(2)}%`);
     console.log(`   Top 10 holders: ${(sec.top10HolderPercent * 100).toFixed(1)}%\n`);
 

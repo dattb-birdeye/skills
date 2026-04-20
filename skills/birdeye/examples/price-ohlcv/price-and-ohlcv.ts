@@ -41,8 +41,10 @@ async function run() {
             console.log(`24h High (resistance): $${resistance.toFixed(4)}`);
             console.log(`24h Low  (support):    $${support.toFixed(4)}`);
             console.log(`Avg hourly volume:     $${avgVol.toLocaleString(undefined, { maximumFractionDigits: 0 })}`);
+            // /defi/v3/ohlcv returns unix_time (snake_case); /defi/ohlcv V1 returns unixTime.
+            const tsSec = lastCandle.unix_time ?? lastCandle.unixTime ?? 0;
             console.log(`\nLast candle:`);
-            console.log(`  Time:   ${new Date(lastCandle.unixTime * 1000).toISOString()}`);
+            console.log(`  Time:   ${tsSec ? new Date(tsSec * 1000).toISOString() : 'unknown'}`);
             console.log(`  Open:   $${lastCandle.o?.toFixed(4)}`);
             console.log(`  Close:  $${lastCandle.c?.toFixed(4)}`);
             console.log(`  Volume: $${lastCandle.v?.toLocaleString()}`);

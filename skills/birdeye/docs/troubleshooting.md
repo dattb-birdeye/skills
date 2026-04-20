@@ -4,16 +4,16 @@ Common issues when building with Birdeye's API — verified against live API res
 
 ---
 
-## 1. `403 Forbidden` on every request
+## 1. `403 Forbidden`
 
-**Cause**: Birdeye blocks common bot User-Agents (`node-fetch`, `python-requests`, `axios` defaults).
-**Fix**: Explicitly set a browser-like `User-Agent`.
+**Cause**: Usually the endpoint requires a higher plan tier (WebSocket → Business+, PnL/SmartMoney → PRO+). Rarely, some older HTTP clients hit 403 without a `User-Agent`.
+**Fix**: Check the endpoint's tier at [Data Accessibility by Packages](https://docs.birdeye.so/docs/data-accessibility-by-packages). As a defensive measure set any `User-Agent`.
 
 ```typescript
 const headers = {
   "X-API-KEY": process.env.BIRDEYE_API_KEY,
   "x-chain": "solana",
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", // CRITICAL
+  "User-Agent": "my-app/1.0", // defensive — any string is fine
   "Accept": "application/json"
 };
 ```
@@ -22,16 +22,13 @@ const headers = {
 
 ## 2. Wallet history missing swaps
 
-**Cause**: Complex DeFi routes (Raydium, Pump.fun, Jupiter aggregated) classify as `mainAction: "unknown"`.
-**Fix**: Don't filter strictly on `"swap"`. A real buy typically has:
-1. `mainAction` is `"swap"`, `"buy"`, or `"unknown"`
-2. `balanceChange` is positive (`> 0`)
-3. Token is an altcoin/memecoin (not SOL or USDC)
+**Cause**: Complex DeFi routes (Raydium, Pump.fun, Jupiter aggregated) classify as `mainAction: "unknown"`. Also: the response wrapper is keyed by chain (`data.solana`), not `data.items`.
+**Fix**: Read the right wrapper key and widen the `mainAction` filter.
 
 ```typescript
-const swaps = txs.items.filter((tx: any) =>
-  ['swap', 'buy', 'unknown'].includes(tx.mainAction)
-);
+const data = await client.wallet.getTxHistory(wallet);
+const txs = data.solana ?? [];   // NOT data.items
+const swaps = txs.filter((tx) => ['swap', 'buy', 'unknown'].includes(tx.mainAction));
 ```
 
 ---
@@ -39,7 +36,7 @@ const swaps = txs.items.filter((tx: any) =>
 ## 3. `429 Too Many Requests`
 
 **Cause**: Exceeded rate limits. Especially common with wallet APIs.
-**Fix**: Exponential backoff; for wallet endpoints, space calls ~500ms apart to stay under the 150 RPM sustained cap.
+**Fix**: Exponential backoff; for wallet endpoints, add mandatory 2s delay between calls.
 
 ```typescript
 async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 4): Promise<Response> {
@@ -58,20 +55,20 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 4)
   throw new Error('Unreachable');
 }
 
-// Wallet endpoints: 150 RPM sustained = 1 call per ~400ms. 500ms adds a safe buffer.
+// Wallet endpoints: 30 RPM = 1 call per 2 seconds
 async function walletFetch(url: string, headers: HeadersInit): Promise<any> {
   const res = await fetch(url, { headers });
-  await new Promise(r => setTimeout(r, 500)); // safe for 150 RPM cap
+  await new Promise(r => setTimeout(r, 2100)); // mandatory spacing
   if (!res.ok) throw new Error(`Wallet API error ${res.status}`);
   return res.json();
 }
 ```
 
-> **Wallet API rate limits** (per-endpoint): **30 RPS burst / 150 RPM sustained** across all plans, on top of the global tier cap. On Standard (1 RPS global), the tier limit binds first. On Business (100 RPS global), sequence wallet calls to stay under 150 RPM.
+> **Wallet API group** (V1 wallet endpoints per Birdeye's rate-limiting docs — `/v1/wallet/token_list`, `/v1/wallet/token_balance`, `/v1/wallet/tx_list`, `/v1/wallet/list_supported_chain`, `/v1/wallet/simulate`, and their multichain variants): documented **30 rpm** cap. Enforcement may differ by plan, so start with ≥ 2 s spacing and widen on 429. V2 wallet endpoints (`/wallet/v2/*`) aren't listed under that cap.
 >
-> **Token List Scroll** (`/defi/v3/token/list/scroll`): only **2 RPS** — add a 500ms delay between scroll calls.
+> **Token List Scroll** (`/defi/v3/token/list/scroll`): only **1 call per 30 seconds per account**.
 >
-> **Global tier limits**: Standard 1 rps · Lite 15 rps · Premium 50 rps · Business 100 rps.
+> **Per-account tier limits**: Standard 1 rps · Lite/Starter 15 rps · Premium 50 rps (1000 rpm) · Business 100 rps (1500 rpm).
 
 ---
 
@@ -84,7 +81,7 @@ async function walletFetch(url: string, headers: HeadersInit): Promise<any> {
 headers['x-chain'] = 'base'; // or: "ethereum" | "arbitrum" | "bsc" | "solana"
 ```
 
-Supported chains: `solana`, `ethereum`, `bsc`, `base`, `arbitrum`, `optimism`, `polygon`, `zksync`, `sui`, `tron`
+Supported chains (per `GET /defi/networks`): `solana`, `ethereum`, `bsc`, `base`, `arbitrum`, `optimism`, `polygon`, `avalanche`, `zksync`, `sui`, `monad`, `megaeth`, `fogo`, `aptos`.
 
 ---
 
@@ -142,7 +139,7 @@ GET /trader/gainers-losers?type=today&sort_by=PnL&sort_type=desc&limit=10
 
 ## 9. WebSocket disconnects or fails to authenticate
 
-**Requires Business tier+.** Chain goes in the **URL path**, not a header. Required connection headers: `Origin` and `Sec-WebSocket-Protocol`.
+**Requires Business tier+.** Chain goes in the **URL path**, not a header. Required: `Origin` header + `echo-protocol` as the **subprotocol argument** (not a raw `Sec-WebSocket-Protocol` header).
 
 ```typescript
 import WebSocket from 'ws';
@@ -150,12 +147,8 @@ import WebSocket from 'ws';
 const chain = 'solana'; // replace with target chain
 const ws = new WebSocket(
   `wss://public-api.birdeye.so/socket/${chain}?x-api-key=${API_KEY}`,
-  {
-    headers: {
-      'Origin': 'ws://public-api.birdeye.so',
-      'Sec-WebSocket-Protocol': 'echo-protocol',
-    },
-  } as any
+  'echo-protocol',
+  { headers: { Origin: 'ws://public-api.birdeye.so' } }
 );
 
 ws.on('open', () => {
@@ -175,17 +168,17 @@ Available channels: `SUBSCRIBE_PRICE` · `SUBSCRIBE_TXS` · `SUBSCRIBE_BASE_QUOT
 
 ---
 
-## 10. `/defi/v3/token/meme/list` returns `400` with sort_by
+## 10. `/defi/v3/token/meme/list` returns `400`
 
-**Cause**: The `sort_by` param is not supported by this endpoint.
-**Fix**: Omit `sort_by`. Results return by recent meme activity by default.
+**Cause**: `sort_by` and `sort_type` are both marked required by the official docs — pass them together, and use a valid `sort_by` value.
+**Fix**: Pass `sort_by` with `sort_type`. Common `sort_by` values: `liquidity`, `volume_24h_usd`, `market_cap`, `fdv`, `recent_listing_time`, `volume_24h_change_percent`, `progress_percent`, `holder`, `price_change_24h_percent`, `trade_24h_count`. See the [official docs](https://docs.birdeye.so/reference/get-defi-v3-token-meme-list) for the full enum. Chain support: `solana`, `bsc`, `monad`.
 
 ```bash
-# Wrong:
-GET /defi/v3/token/meme/list?sort_by=volume24hUSD
+# Wrong — invalid sort_by value:
+GET /defi/v3/token/meme/list?sort_by=volume24hUSD&sort_type=desc&limit=20
 
 # Correct:
-GET /defi/v3/token/meme/list?limit=20
+GET /defi/v3/token/meme/list?sort_by=liquidity&sort_type=desc&limit=20
 ```
 
 ---

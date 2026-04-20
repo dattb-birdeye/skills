@@ -18,15 +18,18 @@ async function run() {
     try {
         const data = await client.market.getNewListings(20);
         const tokens = data?.items ?? (Array.isArray(data) ? data : []);
-        const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
+        // Response fields (live-verified): address, symbol, name, decimals, liquidity,
+        // liquidityAddedAt (ISO string), logoURI, source.
+        const oneHourAgo = Date.now() - 3600 * 1000;
 
         console.log(`\nNew Listings (last 20):`);
         tokens.forEach((token: any) => {
-            const isRecent = token.listingTime > oneHourAgo;
-            const time = new Date((token.listingTime || token.listing_time) * 1000).toISOString();
+            const listedMs = token.liquidityAddedAt ? new Date(token.liquidityAddedAt).getTime() : 0;
+            const isRecent = listedMs > oneHourAgo;
+            const time = listedMs ? new Date(listedMs).toISOString() : 'unknown';
             console.log(`${isRecent ? '🆕' : '  '} ${token.symbol || '???'} (${token.address})`);
             console.log(`   Listed:    ${time}`);
-            console.log(`   Price:     $${token.price?.toFixed(8) ?? 'N/A'}`);
+            console.log(`   Source:    ${token.source ?? 'N/A'}`);
             console.log(`   Liquidity: $${token.liquidity?.toLocaleString() ?? 'N/A'}`);
         });
     } catch (e: any) {

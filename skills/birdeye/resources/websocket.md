@@ -22,24 +22,18 @@ Chain goes in the **URL path** — NOT a header, NOT an additional query param.
 | Optimism | `wss://public-api.birdeye.so/socket/optimism?x-api-key=KEY` |
 | Polygon | `wss://public-api.birdeye.so/socket/polygon?x-api-key=KEY` |
 
-### Required connection headers
+### Required connection setup
 
-```
-Origin: ws://public-api.birdeye.so
-Sec-WebSocket-Protocol: echo-protocol
-```
+- Subprotocol: `echo-protocol` — pass as the subprotocol argument to `new WebSocket(url, subprotocol, options)`, NOT as a raw `Sec-WebSocket-Protocol` header.
+- `Origin: ws://public-api.birdeye.so` header is required.
 
 ```typescript
 import WebSocket from 'ws';
 
 const ws = new WebSocket(
   `wss://public-api.birdeye.so/socket/solana?x-api-key=${API_KEY}`,
-  {
-    headers: {
-      'Origin': 'ws://public-api.birdeye.so',
-      'Sec-WebSocket-Protocol': 'echo-protocol',
-    },
-  } as any
+  'echo-protocol',
+  { headers: { Origin: 'ws://public-api.birdeye.so' } }
 );
 ```
 
@@ -135,12 +129,9 @@ function createWebSocket(
   retryDelay = 1000
 ): WebSocket {
   const url = `wss://public-api.birdeye.so/socket/${chain}?x-api-key=${apiKey}`;
-  const ws = new WebSocket(url, {
-    headers: {
-      'Origin': 'ws://public-api.birdeye.so',
-      'Sec-WebSocket-Protocol': 'echo-protocol',
-    },
-  } as any);
+  const ws = new WebSocket(url, 'echo-protocol', {
+    headers: { Origin: 'ws://public-api.birdeye.so' },
+  });
 
   ws.on('message', (raw) => {
     try { onMessage(JSON.parse(raw.toString())); } catch {}

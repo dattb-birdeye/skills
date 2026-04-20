@@ -8,13 +8,24 @@
 const TOKEN_ADDRESS = process.env.TOKEN_ADDRESS || "So11111111111111111111111111111111111111112";
 const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY!;
 
+// Response fields per official /defi/token_security docs + live responses.
+// Mint authority: the field is `isMintable` (not `mintable`). It's often null on
+// established tokens; treat a non-null truthy value as active mint authority.
 interface SecurityResult {
+  ownerAddress: string | null;
   ownerBalance: number;
   ownerPercentage: number;
+  creatorAddress: string | null;
   creatorBalance: number;
   creatorPercentage: number;
-  mintable: boolean;
-  isTrueToken: boolean;
+  isMintable: boolean | string | null;
+  freezeable: boolean | null;
+  freezeAuthority: string | null;
+  mutableMetadata: boolean;
+  nonTransferable: boolean | null;
+  transferFeeEnable: boolean | null;
+  isTrueToken: boolean | null;
+  fakeToken: unknown;
   totalSupply: number;
   top10HolderBalance: number;
   top10HolderPercent: number;
@@ -27,7 +38,6 @@ async function checkTokenSecurity(address: string): Promise<void> {
     headers: {
       "X-API-KEY": BIRDEYE_API_KEY,
       "x-chain": "solana",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
       "Accept": "application/json",
     },
   });
@@ -38,23 +48,38 @@ async function checkTokenSecurity(address: string): Promise<void> {
 
   console.log("=== TOKEN SECURITY REPORT ===");
   console.log(`Address: ${address}`);
-  console.log(`Is True Token: ${data.isTrueToken}`);
-  console.log(`Mintable: ${data.mintable}`);
-  console.log(`Creator Holds: ${(data.creatorPercentage * 100).toFixed(2)}%`);
-  console.log(`Top 10 Holders: ${(data.top10HolderPercent * 100).toFixed(2)}%`);
+  console.log(`Is True Token:      ${data.isTrueToken}`);
+  console.log(`Mintable:           ${Boolean(data.isMintable)}`);
+  console.log(`Freezeable:         ${Boolean(data.freezeable)}`);
+  console.log(`Freeze Authority:   ${data.freezeAuthority ?? 'none'}`);
+  console.log(`Mutable Metadata:   ${data.mutableMetadata}`);
+  console.log(`Transfer Fee On:    ${Boolean(data.transferFeeEnable)}`);
+  console.log(`Creator Holds:      ${((data.creatorPercentage ?? 0) * 100).toFixed(2)}%`);
+  console.log(`Top 10 Holders:     ${((data.top10HolderPercent ?? 0) * 100).toFixed(2)}%`);
 
   // Risk flags
-  if (data.mintable) {
-    console.warn("⚠️  WARNING: Mint authority is still active — inflation risk.");
+  if (data.isMintable) {
+    console.warn("⚠️  WARNING: Mint authority is active — inflation risk.");
   }
-  if (data.creatorPercentage > 0.20) {
+  if (data.freezeable || data.freezeAuthority) {
+    console.warn("⚠️  WARNING: Freeze authority is still set — tokens could be frozen.");
+  }
+  if (data.transferFeeEnable) {
+    console.warn("⚠️  WARNING: Transfer fee enabled — swaps may bleed on each move.");
+  }
+  if ((data.creatorPercentage ?? 0) > 0.20) {
     console.warn(`⚠️  WARNING: Creator holds ${(data.creatorPercentage * 100).toFixed(1)}% — rug risk.`);
   }
-  if (data.top10HolderPercent > 0.50) {
+  if ((data.top10HolderPercent ?? 0) > 0.50) {
     console.warn(`⚠️  WARNING: Top 10 holders control ${(data.top10HolderPercent * 100).toFixed(1)}% — concentration risk.`);
   }
-  if (data.creatorPercentage < 0.05 && !data.mintable && data.isTrueToken) {
-    console.log("✅ Token appears safe — low creator concentration, no mint authority.");
+  if (
+    (data.creatorPercentage ?? 0) < 0.05 &&
+    !data.isMintable &&
+    !data.freezeable && !data.freezeAuthority &&
+    !data.transferFeeEnable && data.isTrueToken
+  ) {
+    console.log("✅ Token appears safe — low creator %, no mint authority, no freeze authority, no transfer fee.");
   }
 }
 

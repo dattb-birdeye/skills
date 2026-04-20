@@ -36,14 +36,18 @@ async function run() {
         console.log(`  Liquidity:    $${(topMarket.liquidity || 0).toLocaleString()}`);
 
         // Step 3: Fetch detailed pair overview
+        // /defi/v3/pair/overview/single returns snake_case fields:
+        // base.symbol, quote.symbol, price, liquidity, volume_24h, trade_24h
         const pair = await client.market.getPairOverview(pairAddress);
 
         console.log(`\nPair Stats:`);
-        console.log(`  Base:       ${pair.baseToken?.symbol} / ${pair.quoteToken?.symbol}`);
-        console.log(`  Price:      $${pair.basePrice?.toFixed(6)}`);
+        console.log(`  Name:       ${pair.name}`);
+        console.log(`  Base:       ${pair.base?.symbol} / ${pair.quote?.symbol}`);
+        console.log(`  Source:     ${pair.source}`);
+        console.log(`  Price:      $${pair.price?.toFixed(6)}`);
         console.log(`  Liquidity:  $${pair.liquidity?.toLocaleString()}`);
-        console.log(`  Vol 24h:    $${pair.volume24h?.toLocaleString()}`);
-        console.log(`  Trade 24h:  ${pair.trade24h?.toLocaleString()}`);
+        console.log(`  Vol 24h:    $${pair.volume_24h?.toLocaleString()}`);
+        console.log(`  Trade 24h:  ${pair.trade_24h?.toLocaleString()}`);
 
     } catch (e: any) {
         console.error('[Error]', e.message);

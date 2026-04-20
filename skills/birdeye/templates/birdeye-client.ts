@@ -11,8 +11,6 @@
  * - Custom error class with status code
  * - Sub-clients for organized domain access
  *
- * CRITICAL: Mozilla User-Agent is required on ALL requests — omitting it causes 403.
- *
  * Usage:
  * 1. Copy this file to your project
  * 2. Set the BIRDEYE_API_KEY environment variable
@@ -41,6 +39,13 @@ declare const process: { env: Record<string, string | undefined> };
 export interface BirdeyeConfig {
     apiKey: string;
     chain?: string;
+    /**
+     * Account rate limit in requests/minute. Match your Birdeye plan:
+     *   Standard: 60 (1 rps)  •  Lite/Starter: 900 (15 rps)
+     *   Premium:  1000         •  Business:      1500
+     * Env fallback: BIRDEYE_RATE_LIMIT_RPM. Default: 60 (Standard).
+     */
+    rateLimitRpm?: number;
 }
 
 export interface TokenPrice {
@@ -50,15 +55,25 @@ export interface TokenPrice {
     priceChange24h: number;
 }
 
+/**
+ * Response from GET /defi/token_overview.
+ * Field names mirror the actual API (camelCase v1-style).
+ * 24h volume is `v24hUSD` — NOT `volume24h`.
+ */
 export interface TokenOverview {
     address: string;
     name: string;
     symbol: string;
+    decimals: number;
     price: number;
     marketCap: number;
     fdv: number;
     liquidity: number;
-    volume24h: number;
+    /** 24h volume in USD */
+    v24hUSD: number;
+    /** 24h volume in base token units */
+    v24h: number;
+    v24hChangePercent: number;
     holder: number;
     priceChange1mPercent: number;
     priceChange5mPercent: number;
@@ -78,42 +93,71 @@ export interface TokenMetadata {
     extensions: Record<string, string>;
 }
 
+/**
+ * One OHLCV candle.
+ * ⚠️ Field name for the timestamp differs by endpoint:
+ *   /defi/v3/ohlcv  → `unix_time` (snake_case)
+ *   /defi/ohlcv     → `unixTime`  (camelCase — V1 legacy)
+ * Both are included as optional for compatibility. Use the one for your endpoint.
+ */
 export interface OHLCVCandle {
     o: number;  // open
     h: number;  // high
     l: number;  // low
     c: number;  // close
-    v: number;  // volume
-    unixTime: number;
+    v: number;  // volume (base token units)
+    /** V3 `/defi/v3/ohlcv` returns `unix_time` */
+    unix_time?: number;
+    /** V1 `/defi/ohlcv` returns `unixTime` */
+    unixTime?: number;
     type: string;
+    address?: string;
+    currency?: string;
+    /** V3 only — volume denominated in USD */
+    v_usd?: number;
 }
 
+/** Response item from GET /defi/token_trending. */
 export interface TrendingToken {
     address: string;
     name: string;
     symbol: string;
+    decimals: number;
+    logoURI: string;
     price: number;
-    volumeUSD: number;
     liquidity: number;
-    trade24h: number;
+    /** 24h volume in USD (note: `volume24hUSD`, not `volumeUSD`) */
+    volume24hUSD: number;
+    volume24hChangePercent: number;
+    rank: number;
 }
 
 /**
  * One trade from GET /defi/v3/token/txs (token trade feed).
+ * ⚠️ The v3 endpoint returns SNAKE_CASE fields — verified against Birdeye docs.
  * Note: this differs from wallet tx history (/v1/wallet/tx_list).
  */
 export interface TradeTransaction {
-    txHash: string;
-    /** Unix timestamp (number) — use: new Date(tx.block_unix_time * 1000) */
+    tx_hash: string;
+    /** Unix seconds — use: new Date(tx.block_unix_time * 1000) */
     block_unix_time: number;
+    block_number: number;
+    /** "buy" | "sell" — same as `side` for swaps */
+    tx_type: 'buy' | 'sell' | string;
+    /** "buy" | "sell" — trade direction from token-address perspective */
+    side: 'buy' | 'sell' | string;
     source: string;
-    /** 'buy' | 'sell' | 'swap' etc. */
-    type: string;
-    /** from/to are objects with symbol+address on /defi/v3/token/txs */
-    from: { symbol: string; address: string; amount: number; uiAmount: number };
-    to:   { symbol: string; address: string; amount: number; uiAmount: number };
-    volume_usd: number;
     owner: string;
+    /** Trade size in USD (snake_case: `volume_usd`, not `volumeUSD`) */
+    volume_usd: number;
+    /** Trade size in token units */
+    volume: number;
+    price_pair: number;
+    /** Token being spent (object with symbol/address/decimals/amount/ui_amount) */
+    from: { symbol: string; address: string; decimals: number; price: number; amount: string; ui_amount: number; ui_change_amount: number };
+    /** Token being received */
+    to:   { symbol: string; address: string; decimals: number; price: number; amount: string; ui_amount: number; ui_change_amount: number };
+    pool_id?: string;
 }
 
 /**
@@ -130,11 +174,13 @@ export interface WalletTransaction {
     txHash: string;
     /** ISO 8601 string — e.g. "2026-04-13T06:10:38+00:00". Use new Date(tx.blockTime) */
     blockTime: string;
+    blockNumber: number;
     /** Plain sender wallet address string (NOT an object with .symbol) */
     from: string;
     /** Plain receiver wallet address string (NOT an object with .symbol) */
     to: string;
     mainAction: string;
+    contractLabel?: any;
     /** Token movements in this tx — symbol and amount are here, not in from/to */
     balanceChange: Array<{
         address: string;
@@ -144,24 +190,58 @@ export interface WalletTransaction {
         amount: number;       // already parsed, positive = received
         logoURI?: string;
     }>;
+    tokenTransfers?: any[];
     fee?: number;
     status?: string;
 }
 
-export interface TopTrader {
-    address: string;
-    volume: number;
-    trade: number;
-    buy: number;
-    sell: number;
+/**
+ * Response wrapper from GET /v1/wallet/tx_list.
+ * ⚠️ Results are keyed by chain slug, NOT `items`. For Solana calls, read `data.solana`.
+ */
+export interface WalletTxListResponse {
+    solana?: WalletTransaction[];
+    ethereum?: WalletTransaction[];
+    [chain: string]: WalletTransaction[] | undefined;
 }
 
-export interface TokenHolder {
-    address: string;
-    amount: number;
-    uiAmount: number;
-    decimals: number;
+/**
+ * One entry in `/defi/v2/tokens/top_traders`. camelCase fields.
+ * (Verified against live API — `owner` is the wallet, `trade` is the count.)
+ */
+export interface TopTrader {
     owner: string;
+    tokenAddress: string;
+    tags: string[];
+    type: string;
+    /** Total trade count in the time window */
+    trade: number;
+    tradeBuy: number;
+    tradeSell: number;
+    volume: number;
+    volumeBuy: number;
+    volumeSell: number;
+    volumeUsd: number;
+    volumeBuyUSD: number;
+    volumeSellUSD: number;
+    realizedPnl: number;
+    unrealizedPnl: number;
+    totalPnl: number;
+}
+
+/**
+ * One entry from `/defi/v3/token/holder`. snake_case fields.
+ * `mint` is the token mint address; `owner` is the holder wallet address.
+ */
+export interface TokenHolder {
+    mint: string;
+    owner: string;
+    token_account: string;
+    amount: string;
+    ui_amount: number;
+    decimals: number;
+    multiplier?: number;
+    is_scaled_ui_token?: boolean;
 }
 
 export interface HolderDistribution {
@@ -196,10 +276,12 @@ export interface WalletNetWorthItem {
     value: string;
     /** Token price in USD */
     price: number;
+    /** Raw on-chain balance as a string (divide by 10**decimals for UI) */
+    balance?: string;
     decimals?: number;
-    icon?: string;       // logo URL field name in actual response
-    logoURI?: string;    // alternative logo field (some endpoints)
-    uiAmount?: number;
+    /** Logo URL — returned as snake_case `logo_uri` by /wallet/v2/current-net-worth */
+    logo_uri?: string;
+    network?: string;
 }
 
 /**
@@ -232,10 +314,16 @@ export type OHLCVType =
     | '1H' | '2H' | '4H' | '6H' | '8H' | '12H'
     | '1D' | '3D' | '1W' | '1M';
 
+/**
+ * Supported chains per GET /defi/networks (authoritative list).
+ * Not every endpoint supports every chain — see resources/supported-networks.md.
+ */
 export type SupportedChain =
     | 'solana' | 'ethereum' | 'bsc' | 'base'
     | 'arbitrum' | 'optimism' | 'polygon'
-    | 'zksync' | 'avalanche' | 'sui' | 'tron' | 'monad';
+    | 'zksync' | 'avalanche' | 'sui'
+    | 'monad' | 'megaeth' | 'fogo' | 'aptos'
+    | 'hyperevm' | 'mantle';
 
 /** sort_by for /defi/token_trending */
 export type TrendingSortBy = 'rank' | 'volumeUSD' | 'liquidity';
@@ -247,7 +335,10 @@ export type MarketsSortBy = 'liquidity' | 'volume24h';
 export type MarketsTimeFrame = '30m' | '1h' | '2h' | '4h' | '6h' | '8h' | '12h' | '24h';
 
 /** time_frame for /defi/v2/tokens/top_traders */
-export type TopTradersTimeFrame = '30m' | '1h' | '2h' | '4h' | '6h' | '8h' | '12h' | '24h';
+export type TopTradersTimeFrame =
+    | '30m' | '1h' | '2h' | '4h' | '6h' | '8h' | '12h' | '24h'
+    // Solana-only per official docs:
+    | '2d' | '3d' | '7d' | '14d' | '30d' | '60d' | '90d';
 
 /** type for /trader/gainers-losers */
 export type GainersLosersType = 'today' | 'yesterday' | '1W';
@@ -312,10 +403,13 @@ export class BirdeyeClient {
         this.apiKey = config.apiKey;
         this.chain  = config.chain || 'solana';
 
-        // Rate limit per tier — adjust maxPerMinute to your plan:
-        //   Standard: ~60/min (1 rps)  Lite: ~900 (15 rps)
-        //   Premium: ~3000 (50 rps)    Business: ~6000 (100 rps)
-        this.rateLimiter = new RateLimiter(60);
+        // Per-account rate limit — override to match your plan. Official tiers:
+        //   Standard: 60 rpm (1 rps)   Lite/Starter: 900 rpm (15 rps)
+        //   Premium:  1000 rpm         Business:     1500 rpm (WebSocket included)
+        // Wallet V1 group: documented 30 rpm cap (enforcement may vary by plan).
+        const envRpm = Number(process.env.BIRDEYE_RATE_LIMIT_RPM);
+        const rpm = config.rateLimitRpm ?? (Number.isFinite(envRpm) && envRpm > 0 ? envRpm : 60);
+        this.rateLimiter = new RateLimiter(rpm);
 
         this.price  = new PriceClient(this);
         this.token  = new TokenClient(this);
@@ -338,10 +432,7 @@ export class BirdeyeClient {
         return new BirdeyeClient(config);
     }
 
-    /**
-     * Internal GET with rate limiting and retry on 429/5xx.
-     * CRITICAL: Mozilla User-Agent required — absence causes 403.
-     */
+    /** Internal GET with rate limiting and retry on 429/5xx. */
     async get<T>(endpoint: string, params: Record<string, any> = {}): Promise<T> {
         await this.rateLimiter.acquire();
 
@@ -368,10 +459,12 @@ export class BirdeyeClient {
     }
 
     private _headers() {
+        // User-Agent is not required by Birdeye today, but some runtimes (old Node,
+        // certain proxies) historically caused 403s when omitted. Included defensively.
         return {
             'X-API-KEY': this.apiKey,
             'x-chain':   this.chain,
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'User-Agent': 'birdeye-client-ts',
             'Accept':    'application/json',
         };
     }
@@ -384,7 +477,10 @@ export class BirdeyeClient {
                 if (res.ok) {
                     const json = await res.json() as any;
                     if (json.success === false) {
-                        throw new BirdeyeError(json.message || JSON.stringify(json), 200, endpoint);
+                        // Error envelope varies: some endpoints use `message`,
+                        // others nest details under `error: { code, message, details }`.
+                        const msg = json.error?.message || json.message || JSON.stringify(json);
+                        throw new BirdeyeError(msg, 200, endpoint);
                     }
                     return json.data as T;
                 }
@@ -399,12 +495,16 @@ export class BirdeyeClient {
                 }
 
                 const body = await res.json().catch(() => ({})) as any;
-                throw new BirdeyeError(body.message || res.statusText, res.status, endpoint);
-            } catch (error) {
-                if (error instanceof BirdeyeError) throw error;
-                const message = error instanceof Error ? error.message : String(error);
+                const msg = body.error?.message || body.message || res.statusText;
+                throw new BirdeyeError(msg, res.status, endpoint);
+            } catch (err) {
+                // BirdeyeError (thrown above) is not retryable — rethrow as-is.
+                if (err instanceof BirdeyeError) throw err;
+
+                // Network-level failure (DNS, TCP reset, timeout). Retry with backoff.
+                const msg = err instanceof Error ? err.message : String(err);
                 if (attempt === maxRetries) {
-                    throw new BirdeyeError(`Failed after ${maxRetries} retries: ${message}`, 0, endpoint);
+                    throw new BirdeyeError(`Network error after ${maxRetries} retries: ${msg}`, 0, endpoint);
                 }
                 const delay = Math.min(1000 * Math.pow(2, attempt), 16_000);
                 await new Promise(r => setTimeout(r, delay));
@@ -495,7 +595,8 @@ class TokenClient {
 
     /**
      * Security check: mint authority, creator concentration, honeypot flags.
-     * Key fields: mintable, isTrueToken, top10HolderPercent, creatorPercentage.
+     * Key fields: isMintable (not `mintable`), freezeable, freezeAuthority,
+     * transferFeeEnable, isTrueToken, top10HolderPercent, creatorPercentage.
      */
     getSecurity(address: string): Promise<any> {
         return this.c.get('/defi/token_security', { address });
@@ -545,19 +646,35 @@ class MarketClient {
     }
 
     /**
-     * Meme token leaderboard (Solana, BSC, monad).
-     * ⚠️ sort_by is NOT supported — passing any value returns 400 "invalid sort_by parameter".
-     * Results return by recent meme activity by default.
+     * Meme token leaderboard. Supported chains: solana, bsc, monad.
+     * Official docs mark `sort_by` and `sort_type` as required — pass them together
+     * for predictable results.
+     *
+     * Full `sort_by` enum (per official docs):
+     *   progress_percent · graduated_time · creation_time · liquidity · market_cap ·
+     *   fdv · recent_listing_time · last_trade_unix_time · holder ·
+     *   volume_{1m,5m,30m,1h,2h,4h,8h,24h,7d,30d}_usd ·
+     *   volume_{1m,5m,30m,1h,2h,4h,8h,24h,7d,30d}_change_percent ·
+     *   price_change_{1m,5m,30m,1h,2h,4h,8h,24h,7d,30d}_percent ·
+     *   trade_{1m,5m,30m,1h,2h,4h,8h,24h,7d,30d}_count
+     * Typed loosely as string — the full enum is large and may expand; caller is
+     * responsible for passing a valid value.
      */
-    getMemeTokens(limit = 20): Promise<any> {
-        return this.c.get('/defi/v3/token/meme/list', { limit });
+    getMemeTokens(
+        sort_by: string = 'liquidity',
+        sort_type: 'asc' | 'desc' = 'desc',
+        limit = 20,
+    ): Promise<any> {
+        return this.c.get('/defi/v3/token/meme/list', { sort_by, sort_type, limit });
     }
 
     /**
-     * Search tokens or markets by keyword/address (Solana only).
-     * sort_by and sort_type are required.
+     * Search tokens or markets by keyword/address. Multi-chain — the `chain`
+     * query param accepts `all` or any supported network value.
+     * sort_by and sort_type are required per official docs.
      * target: 'all' | 'token' | 'market'
      * search_by: 'combination' | 'address' | 'name' | 'symbol'
+     * Note: `verify_token` and `markets` filters are Solana-only.
      */
     search(
         keyword: string,
@@ -569,7 +686,7 @@ class MarketClient {
     ): Promise<any> {
         return this.c.get('/defi/v3/search', {
             keyword,
-            chain: this.c.chain,  // required as query param in addition to x-chain header
+            chain: this.c.chain,  // also sent as x-chain header
             target,
             search_by,
             sort_by,
@@ -594,7 +711,8 @@ class MarketClient {
     }
 
     /**
-     * Stats for a specific pair address (Solana only).
+     * Stats for a specific pair address. Supported chains (per official docs):
+     * `solana`, `fogo`.
      */
     getPairOverview(pairAddress: string): Promise<any> {
         return this.c.get('/defi/v3/pair/overview/single', { address: pairAddress });
@@ -610,9 +728,10 @@ class TradesClient {
 
     /**
      * Recent trades for a token.
+     * Response fields are snake_case: `tx_type`, `side`, `volume_usd`, `block_unix_time`.
      * tx_type: 'swap' | 'buy' | 'sell' | 'add' | 'remove' | 'all'
-     * GOTCHA: Many Raydium/Pump.fun swaps have mainAction="unknown".
-     * Filter by volumeUSD > 0 rather than relying on tx_type alone.
+     * `side` is "buy"/"sell" from the token-address perspective.
+     * Filter by `volume_usd > 0` if you need to exclude zero-value entries.
      */
     getTokenTrades(
         address: string,
@@ -632,14 +751,15 @@ class TraderClient {
 
     /**
      * Top traders for a token.
-     * time_frame: '30m'|'1h'|'2h'|'4h'|'6h'|'8h'|'12h'|'24h'
-     * sort_by: 'volume' | 'trade'
-     * sort_type is REQUIRED.
+     * time_frame: '30m'|'1h'|'2h'|'4h'|'6h'|'8h'|'12h'|'24h' (plus '2d'|'3d'|'7d'|'14d'|'30d'|'60d'|'90d' on Solana)
+     * sort_by: 'volume' | 'trade' | 'total_pnl' | 'unrealized_pnl' | 'realized_pnl' | 'volume_usd'
+     *   PnL sort values are Solana-only per official docs.
+     * sort_type is required by the official docs.
      */
     getTopTraders(
         address: string,
         time_frame: TopTradersTimeFrame = '24h',
-        sort_by: 'volume' | 'trade' = 'volume',
+        sort_by: 'volume' | 'trade' | 'total_pnl' | 'unrealized_pnl' | 'realized_pnl' | 'volume_usd' = 'volume',
         sort_type: 'asc' | 'desc' = 'desc',
         limit = 10
     ): Promise<{ items: TopTrader[] }> {
@@ -732,7 +852,10 @@ class WalletClient {
     /**
      * Transaction history from /v1/wallet/tx_list.
      *
-     * ⚠️ ACTUAL FIELD SHAPES (differ from /defi/v3/token/txs):
+     * ⚠️ RESPONSE WRAPPER: `{ solana: [...] }` (keyed by chain), NOT `{ items: [...] }`.
+     *    For Solana: const txs = data.solana ?? [];
+     *
+     * ⚠️ FIELD SHAPES (differ from /defi/v3/token/txs):
      *   tx.blockTime     → ISO string e.g. "2026-04-13T06:10:38+00:00"  (NOT unix number)
      *   tx.from / tx.to  → plain wallet address string                   (NOT objects)
      *   token info       → tx.balanceChange[].symbol / .amount
@@ -744,7 +867,7 @@ class WalletClient {
      * Many Raydium/Pump.fun swaps return mainAction="unknown".
      * Filter by balanceChange[].amount > 0 to find received tokens.
      */
-    getTxHistory(wallet: string, limit = 50): Promise<{ items: WalletTransaction[] }> {
+    getTxHistory(wallet: string, limit = 50): Promise<WalletTxListResponse> {
         return this.c.get('/v1/wallet/tx_list', { wallet, limit });
     }
 

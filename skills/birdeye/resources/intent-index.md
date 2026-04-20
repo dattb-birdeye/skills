@@ -53,17 +53,17 @@ Find your intent below, get the endpoint, then check `api-reference.md` for full
 
 | Intent | Endpoint | CU | Chain |
 |---|---|---|---|
-| Search token by name, symbol, or address | `GET /defi/v3/search` | low | SOL |
+| Search token by name, symbol, or address | `GET /defi/v3/search` | low | multi |
 | Browse tokens ranked by volume/liquidity/mc | `GET /defi/v3/token/list` | 100 | multi |
 | Iterate full token universe (scroll) | `GET /defi/v3/token/list/scroll` | 500 | multi |
 | Trending tokens right now | `GET /defi/token_trending` | var | all |
 | Recently listed tokens / new listings | `GET /defi/v2/tokens/new_listing` | 80 | all |
-| Meme tokens (pump.fun, bonding curve) | `GET /defi/v3/token/meme/list` | var | SOL/BSC |
-| Meme token detail (graduation status, progress) | `GET /defi/v3/token/meme/detail/single` | 30 | SOL/BSC |
+| Meme tokens (pump.fun, bonding curve) | `GET /defi/v3/token/meme/list` | var | SOL/BSC/Monad |
+| Meme token detail (graduation status, progress) | `GET /defi/v3/token/meme/detail/single` | 30 | SOL/BSC/Monad |
 | Token creation info (deployer, timestamp) | `GET /defi/token_creation_info` | 80 | **SOL** |
 | All DEX pools / markets for a token | `GET /defi/v2/markets` | var | all |
 
-> ⚠️ `/defi/v3/token/meme/list` — do NOT pass `sort_by`. Param is broken and returns 400.
+> ⚠️ `/defi/v3/token/meme/list` — official docs mark both `sort_by` and `sort_type` as required; pass them together. Common `sort_by` values: `liquidity`, `volume_24h_usd`, `market_cap`, `fdv`, `recent_listing_time`, `volume_24h_change_percent`, `progress_percent`, `holder`, `price_change_24h_percent`, `trade_24h_count`. See the official docs for the full enum.
 
 ---
 
@@ -71,7 +71,7 @@ Find your intent below, get the endpoint, then check `api-reference.md` for full
 
 | Intent | Endpoint | CU | Chain |
 |---|---|---|---|
-| Token security audit (mint auth, freeze auth, lock) | `GET /defi/token_security` | 50 | **SOL** |
+| Token security audit (mint auth, freeze auth, lock) | `GET /defi/token_security` | 50 | all except Sui |
 
 ---
 

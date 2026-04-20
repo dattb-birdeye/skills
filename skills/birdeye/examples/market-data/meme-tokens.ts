@@ -6,8 +6,13 @@
  *
  * Run: BIRDEYE_API_KEY=xxx npx ts-node examples/market-data/meme-tokens.ts
  *
- * NOTE: Do NOT pass sort_by — any value causes a 400 response.
- * Supported chains: solana, bsc, monad.
+ * NOTE: /defi/v3/token/meme/list — official docs mark both `sort_by` and
+ * `sort_type` as required; pass them together. Common sort_by values:
+ * 'liquidity', 'volume_24h_usd', 'market_cap', 'fdv', 'recent_listing_time',
+ * 'volume_24h_change_percent', 'progress_percent', 'holder',
+ * 'price_change_24h_percent', 'trade_24h_count'. See the official docs
+ * (https://docs.birdeye.so/reference/get-defi-v3-token-meme-list) for the
+ * full enum. Supported chains: solana, bsc, monad.
  */
 
 const BASE = 'https://public-api.birdeye.so';
@@ -26,16 +31,22 @@ interface MemeToken {
   symbol: string;
   name: string;
   price: number;
-  volume24h: number;
-  marketCap: number;
-  priceChange24h: number;
-  graduationProgress?: number; // pump.fun progress to graduation
-  logoURI?: string;
+  volume_24h_usd: number;
+  market_cap: number;
+  price_change_24h_percent: number;
+  liquidity: number;
+  last_trade_unix_time: number;
+  logo_uri?: string;
 }
 
 async function getMemeList(apiKey: string, limit = 20): Promise<MemeToken[]> {
-  // ⚠️ Do NOT pass sort_by — any value causes 400 "invalid sort_by parameter"
-  const url = `${BASE}/defi/v3/token/meme/list?limit=${limit}`;
+  // sort_by + sort_type are both marked required by the official docs.
+  const params = new URLSearchParams({
+    sort_by: 'liquidity',
+    sort_type: 'desc',
+    limit: String(limit),
+  });
+  const url = `${BASE}/defi/v3/token/meme/list?${params}`;
   const res = await fetch(url, { headers: headers(apiKey) });
   const json = await res.json() as any;
   if (!json.success) throw new Error(`Meme list failed: ${json.message}`);
@@ -58,8 +69,12 @@ async function getTokenSecurity(apiKey: string, address: string): Promise<any> {
 }
 
 function riskLevel(security: any): string {
+  // /defi/token_security response fields: isMintable, freezeable, freezeAuthority,
+  // mutableMetadata, nonTransferable, transferFeeEnable, creatorPercentage,
+  // top10HolderPercent, ownerPercentage. (Field is `isMintable`, not `mintable`.)
   if (!security) return 'unknown';
-  if (security.mintable || security.freezeable) return '🔴 HIGH';
+  if (security.isMintable || security.freezeable || security.freezeAuthority) return '🔴 HIGH';
+  if (security.transferFeeEnable) return '🟡 MEDIUM';
   if ((security.creatorPercentage ?? 0) > 0.2) return '🟡 MEDIUM';
   if ((security.top10HolderPercent ?? 0) > 0.5) return '🟡 MEDIUM';
   return '🟢 LOW';
@@ -81,11 +96,11 @@ async function run() {
     const risk = riskLevel(security);
 
     const price = token.price?.toFixed(8) ?? 'N/A';
-    const vol = token.volume24h
-      ? `$${(token.volume24h / 1000).toFixed(1)}k`
+    const vol = token.volume_24h_usd
+      ? `$${(token.volume_24h_usd / 1000).toFixed(1)}k`
       : 'N/A';
-    const change = token.priceChange24h
-      ? `${token.priceChange24h > 0 ? '+' : ''}${token.priceChange24h.toFixed(1)}%`
+    const change = token.price_change_24h_percent
+      ? `${token.price_change_24h_percent > 0 ? '+' : ''}${token.price_change_24h_percent.toFixed(1)}%`
       : 'N/A';
 
     console.log(`${token.symbol.padEnd(12)} | Price: $${price} | 24h Vol: ${vol} | Change: ${change} | Risk: ${risk}`);

@@ -17,7 +17,7 @@ async function run() {
     console.log(`Fetching recent trades for ${address}...`);
 
     try {
-        // Fetch last 50 swap transactions
+        // /defi/v3/token/txs returns snake_case: tx_type, side, volume_usd, block_unix_time
         const data = await client.trades.getTokenTrades(address, 'swap', 50);
         const txs = data?.items ?? [];
 
@@ -26,12 +26,12 @@ async function run() {
             return;
         }
 
-        // Separate buys vs sells
-        const buys  = txs.filter((tx: any) => tx.type === 'buy');
-        const sells = txs.filter((tx: any) => tx.type === 'sell');
+        // `side` is "buy"/"sell" from the token-address perspective
+        const buys  = txs.filter(tx => tx.side === 'buy');
+        const sells = txs.filter(tx => tx.side === 'sell');
 
-        const buyVolume  = buys.reduce((sum: number, tx: any)  => sum + (tx.volume_usd || 0), 0);
-        const sellVolume = sells.reduce((sum: number, tx: any) => sum + (tx.volume_usd || 0), 0);
+        const buyVolume  = buys.reduce((sum, tx)  => sum + (tx.volume_usd || 0), 0);
+        const sellVolume = sells.reduce((sum, tx) => sum + (tx.volume_usd || 0), 0);
         const totalVol   = buyVolume + sellVolume;
         const buyPressure = totalVol > 0 ? (buyVolume / totalVol) * 100 : 0;
 
@@ -50,9 +50,9 @@ async function run() {
 
         // Recent trades
         console.log('\nMost recent trades:');
-        txs.slice(0, 5).forEach((tx: any) => {
+        txs.slice(0, 5).forEach(tx => {
             const time = new Date(tx.block_unix_time * 1000).toISOString();
-            console.log(`  [${time}] ${tx.type || '?'} — $${(tx.volume_usd || 0).toFixed(2)}`);
+            console.log(`  [${time}] ${tx.side} — $${(tx.volume_usd || 0).toFixed(2)} (${tx.source})`);
         });
 
     } catch (e: any) {

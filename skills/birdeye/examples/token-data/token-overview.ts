@@ -14,24 +14,25 @@ async function run() {
     }
 
     const client = BirdeyeClient.createWithConfig({ apiKey, chain: 'solana' });
-    
+
     // Solana's Wrapped SOL address
     const WSOL = 'So11111111111111111111111111111111111111112';
 
     console.log(`Fetching Token Overview for WSOL...`);
-    
+
     try {
         const data = await client.token.getOverview(WSOL);
-        
+
+        // Actual /defi/token_overview response fields: marketCap, v24hUSD (not mc/volume24h)
         console.log("\n--- WSOL Metrics ---");
         console.log(`Price: $${data.price.toFixed(4)}`);
         console.log(`Market Cap: $${data.marketCap.toLocaleString()}`);
-        console.log(`24h Volume: $${data.volume24h.toLocaleString()}`);
+        console.log(`24h Volume: $${data.v24hUSD.toLocaleString()}`);
         console.log(`Holders: ${data.holder.toLocaleString()}`);
         console.log(`Unique Wallets 24h: ${data.uniqueWallet24h.toLocaleString()}`);
-        
-    } catch (e) {
-        console.error("Error:", e);
+
+    } catch (e: any) {
+        console.error("[Error]", e.message);
     }
 }
 

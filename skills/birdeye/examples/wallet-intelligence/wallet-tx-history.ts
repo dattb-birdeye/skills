@@ -31,8 +31,9 @@ async function run() {
 
     console.log(`\n⏳ Fetching last 20 transactions for ${wallet}…\n`);
 
+    // Response wrapper is keyed by chain: { solana: [...] }, NOT { items: [...] }
     const data = await client.wallet.getTxHistory(wallet, 20);
-    const txs: WalletTransaction[] = data.items ?? [];
+    const txs: WalletTransaction[] = data.solana ?? [];
 
     if (txs.length === 0) {
         console.log('No transactions found.');

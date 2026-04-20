@@ -7,11 +7,11 @@ Complete endpoint reference for AI Agents. Every path below is **live-tested** w
 **Required headers on every request:**
 ```http
 X-API-KEY: <YOUR_API_KEY>
-x-chain: solana        # or: ethereum, bsc, base, arbitrum, optimism, polygon, zksync, sui, tron
+x-chain: solana        # or: ethereum, bsc, base, arbitrum, optimism, polygon, avalanche, zksync, sui, aptos, mantle, monad, megaeth, fogo, hyperevm
 User-Agent: Mozilla/5.0
 Accept: application/json
 ```
-Missing `User-Agent` → **403**. Missing `X-API-KEY` → **401**. Wrong `x-chain` → empty data.
+Missing `X-API-KEY` → **401**. Wrong `x-chain` → empty data. (A `User-Agent` is not strictly required today, but some older HTTP clients historically hit 403 without one — keep one set defensively.)
 
 ---
 
@@ -24,10 +24,10 @@ Missing `User-Agent` → **403**. Missing `X-API-KEY` → **401**. Wrong `x-chai
 | Price + Volume (single) | `GET /defi/price_volume/single?address=` | Standard+ |
 | Price + Volume (multiple) | `GET /defi/price_volume/multi` | Business+ |
 | Historical price at a single unix timestamp | `GET /defi/historical_price_unix?address=&unixtime=<unix>` | Standard+ |
-| OHLCV candles (V3 — preferred) | `GET /defi/v3/ohlcv?address=&type=1H` | Standard+ |
-| OHLCV candles (V1 — legacy) | `GET /defi/ohlcv?address=&type=1D` | Standard+ |
-| OHLCV for a pair (V3) | `GET /defi/v3/ohlcv/pair?address=<PAIR>&type=1H` | Standard+ |
-| OHLCV base/quote | `GET /defi/ohlcv/base_quote?base_address=&quote_address=&type=` | Standard+ |
+| OHLCV candles (V3 — preferred) | `GET /defi/v3/ohlcv?address=&type=1H&time_from=<unix>&time_to=<unix>` | Standard+ |
+| OHLCV candles (V1 — legacy) | `GET /defi/ohlcv?address=&type=1D&time_from=<unix>&time_to=<unix>` | Standard+ |
+| OHLCV for a pair (V3) | `GET /defi/v3/ohlcv/pair?address=<PAIR>&type=1H&time_from=<unix>&time_to=<unix>` | Standard+ |
+| OHLCV base/quote | `GET /defi/ohlcv/base_quote?base_address=&quote_address=&type=&time_from=<unix>&time_to=<unix>` | Standard+ |
 | Historical price by time range | `GET /defi/history_price?address=&address_type=token&type=1H&time_from=<unix>&time_to=<unix>` | Standard+ |
 | Price stats (% change, high/low) — single | `GET /defi/v3/price/stats/single?address=` | Standard+ |
 | Price stats — batch | `POST /defi/v3/price/stats/multiple` (body: `{"list_address":["..."]}`) | Business+ |
@@ -61,7 +61,7 @@ Missing `User-Agent` → **403**. Missing `X-API-KEY` → **401**. Wrong `x-chai
 
 **`/defi/tokenlist` (V1 legacy) `sort_by`:** `v24hUSD` · `liquidity` — this endpoint is the ONLY one where `v24hUSD` is valid. Use V3 for new code.
 
-**⚠️ `/defi/v3/token/meme/list` does NOT support `sort_by`** — any value returns 400. Omit it; only pass `limit`.
+**⚠️ `/defi/v3/token/meme/list`** — official docs mark both `sort_by` and `sort_type` as required; pass them together. The full `sort_by` enum (per official docs) includes: `progress_percent`, `graduated_time`, `creation_time`, `liquidity`, `market_cap`, `fdv`, `recent_listing_time`, `last_trade_unix_time`, `holder`, plus `volume_{1m,5m,30m,1h,2h,4h,8h,24h,7d,30d}_usd` / `..._change_percent`, `price_change_{1m,5m,30m,1h,2h,4h,8h,24h,7d,30d}_percent`, and `trade_{1m,5m,30m,1h,2h,4h,8h,24h,7d,30d}_count`. Example: `?sort_by=liquidity&sort_type=desc&limit=20`.
 
 ---
 
@@ -71,7 +71,7 @@ Missing `User-Agent` → **403**. Missing `X-API-KEY` → **401**. Wrong `x-chai
 |---|---|---|
 | Trending tokens | `GET /defi/token_trending?sort_by=rank&sort_type=asc&limit=20` | Standard+ |
 | New listings | `GET /defi/v2/tokens/new_listing?limit=20` | Standard+ |
-| Meme token leaderboard | `GET /defi/v3/token/meme/list?limit=20` | Standard+ |
+| Meme token leaderboard | `GET /defi/v3/token/meme/list?sort_by=liquidity&sort_type=desc&limit=20` | Standard+ |
 | Meme token detail | `GET /defi/v3/token/meme/detail/single?address=` | Standard+ |
 | Smart Money signals | `GET /smart-money/v1/token/list` | PRO Only |
 | Search tokens / pairs | `GET /defi/v3/search?keyword=BONK&chain=solana&target=token&sort_by=liquidity&sort_type=desc&limit=20` | Standard+ |
@@ -125,7 +125,10 @@ Missing `User-Agent` → **403**. Missing `X-API-KEY` → **401**. Wrong `x-chai
 | All-time trade stats — single | `GET /defi/v3/all-time/trades/single?address=&time_frame=24h` | Standard+ |
 | All-time trade stats — batch | `POST /defi/v3/all-time/trades/multiple` (query: `time_frame=24h&list_address=a,b`) | Business+ |
 
-**`top_traders` `time_frame`:** `30m` · `1h` · `2h` · `4h` · `6h` · `8h` · `12h` · `24h` — `sort_type` is required.
+**`top_traders`:**
+- `time_frame`: `30m` · `1h` · `2h` · `4h` · `6h` · `8h` · `12h` · `24h` on any chain, plus `2d` · `3d` · `7d` · `14d` · `30d` · `60d` · `90d` **Solana-only**.
+- `sort_by`: `volume` · `trade` · `total_pnl` · `unrealized_pnl` · `realized_pnl` · `volume_usd`. The PnL sort values are **Solana-only**.
+- `sort_type` is required.
 
 **`gainers-losers` `type` values:** `today` · `yesterday` · `1W` — all three params (`type`, `sort_by`, `sort_type`) are required. `sort_by` only accepts `PnL`. Using `'gainers'`/`'losers'` as type value causes 400.
 
@@ -171,13 +174,12 @@ Missing `User-Agent` → **403**. Missing `X-API-KEY` → **401**. Wrong `x-chai
 | P&L per token (GET) | `GET /wallet/v2/pnl?wallet=&token_addresses=addr1,addr2` | PRO Only |
 | P&L per token (POST, with filters) | `POST /wallet/v2/pnl/details` (body: `{"wallet":"...","token_addresses":["..."],"duration":"all","sort_by":"last_trade","sort_type":"desc"}`) | PRO Only |
 | P&L across wallets for one token | `GET /wallet/v2/pnl/multiple?token_address=&wallets=addr1,addr2` | PRO Only |
-| Transaction history V1 | `GET /v1/wallet/tx_list?wallet=&limit=50` | Standard+ |
-| Transaction history V2 | `GET /wallet/tx_list?wallet=` | Standard+ |
+| Transaction history | `GET /v1/wallet/tx_list?wallet=&limit=50` | Standard+ |
 | First funded transaction | `POST /wallet/v2/tx/first-funded` (body: `{"wallets":["..."]}`) | Standard+ |
 | Simulate transaction | `POST /v1/wallet/simulate` | Standard+ |
 | Supported chains | `GET /v1/wallet/list_supported_chain` | Standard+ |
 
-**⚠️ Wallet APIs:** Per-endpoint cap of **30 RPS burst / 150 RPM sustained** across all packages. Also subject to the tier's global rps limit (Standard: 1 rps, Lite: 15 rps, Premium: 50 rps, Business: 100 rps). Sequence calls; avoid parallelizing wallet requests.
+**⚠️ Wallet APIs:** The V1 wallet endpoints listed in Birdeye's [rate-limiting docs](https://docs.birdeye.so/docs/rate-limiting) (`/v1/wallet/token_list`, `/v1/wallet/token_balance`, `/v1/wallet/tx_list`, `/v1/wallet/list_supported_chain`, `/v1/wallet/simulate`, and multichain variants) carry a documented **30 rpm** cap (~1 call / 2 s). Exact enforcement may vary by plan, so treat 30 rpm as a conservative floor: sequence calls, avoid parallelizing, back off on 429. V2 wallet endpoints (`/wallet/v2/*`) aren't listed under this cap.
 
 **`sort_type` required** on all `/wallet/v2/net-worth*` endpoints — omitting it causes 400.
 
@@ -214,7 +216,7 @@ Filter by `balanceChange > 0` instead of strictly matching `mainAction === "swap
 
 **Requires Business tier+.**  
 **URL:** `wss://public-api.birdeye.so/socket/{chain}?x-api-key=YOUR_KEY` — chain in URL path, NOT a header.  
-**Required connection headers:** `Origin: ws://public-api.birdeye.so` · `Sec-WebSocket-Protocol: echo-protocol`
+**Required connection setup:** `Origin: ws://public-api.birdeye.so` header, plus `echo-protocol` as the **subprotocol argument** (not a raw `Sec-WebSocket-Protocol` header).
 
 | Channel | Trigger | CU/byte | Data wrapper |
 |---|---|---|---|
@@ -231,9 +233,11 @@ Filter by `balanceChange > 0` instead of strictly matching `mainAction === "swap
 ```typescript
 import WebSocket from 'ws';
 
+// Pass 'echo-protocol' as the subprotocol argument — not a raw header.
 const ws = new WebSocket(
   `wss://public-api.birdeye.so/socket/solana?x-api-key=${API_KEY}`,
-  { headers: { 'Origin': 'ws://public-api.birdeye.so', 'Sec-WebSocket-Protocol': 'echo-protocol' } } as any
+  'echo-protocol',
+  { headers: { Origin: 'ws://public-api.birdeye.so' } }
 );
 ws.on('open', () => ws.send(JSON.stringify({
   type: 'SUBSCRIBE_PRICE',

@@ -21,46 +21,41 @@ function headers(apiKey: string) {
   };
 }
 
+// Live-verified response shape. NOTE: /smart-money/v1/token/list returns
+// {data: [...]} directly — NO {success:true} wrapper and NO {items:[]} nesting.
 interface SmartMoneyToken {
-  address: string;
+  token: string;              // token address (NOT `address`)
   symbol: string;
   name: string;
   price: number;
-  netFlow: number;       // net USD flow from smart money (+ = accumulation, - = distribution)
-  buyVolume: number;
-  sellVolume: number;
-  uniqueBuyers: number;
-  uniqueSellers: number;
+  liquidity: number;
+  market_cap: number;
+  net_flow: number;           // + = accumulation, - = distribution
+  smart_traders_no: number;   // count of smart-money wallets
+  trader_style: string;       // e.g. "trenchers", "risk_balancers"
+  volume_usd: number;
+  volume_buy_usd: number;
+  volume_sell_usd: number;
+  price_change_percent: number;
+  logo_uri?: string;
 }
 
-// Accumulation signal: sort by net_flow descending (smart money buying)
-async function getSmartMoneyAccumulation(apiKey: string, limit = 20): Promise<SmartMoneyToken[]> {
+async function getSmartMoneyList(
+  apiKey: string,
+  sortType: 'desc' | 'asc',
+  limit: number,
+): Promise<SmartMoneyToken[]> {
   const params = new URLSearchParams({
     sort_by: 'net_flow',
-    sort_type: 'desc',
+    sort_type: sortType,
     limit: String(limit),
     offset: '0',
   });
   const url = `${BASE}/smart-money/v1/token/list?${params}`;
   const res = await fetch(url, { headers: headers(apiKey) });
+  if (!res.ok) throw new Error(`Smart money API ${res.status}: ${res.statusText}`);
   const json = await res.json() as any;
-  if (!json.success) throw new Error(`Smart money API failed: ${json.message}`);
-  return json.data?.items ?? [];
-}
-
-// Distribution signal: sort by net_flow ascending (smart money selling)
-async function getSmartMoneyDistribution(apiKey: string, limit = 10): Promise<SmartMoneyToken[]> {
-  const params = new URLSearchParams({
-    sort_by: 'net_flow',
-    sort_type: 'asc',
-    limit: String(limit),
-    offset: '0',
-  });
-  const url = `${BASE}/smart-money/v1/token/list?${params}`;
-  const res = await fetch(url, { headers: headers(apiKey) });
-  const json = await res.json() as any;
-  if (!json.success) throw new Error(`Smart money API failed: ${json.message}`);
-  return json.data?.items ?? [];
+  return Array.isArray(json.data) ? json.data : [];
 }
 
 function formatUSD(n: number): string {
@@ -73,30 +68,27 @@ async function run() {
   const apiKey = process.env.BIRDEYE_API_KEY;
   if (!apiKey) { console.error('Set BIRDEYE_API_KEY env var.'); process.exit(1); }
 
-  console.log('=== Smart Money Accumulation (top buys) ===\n');
-  const accumulating = await getSmartMoneyAccumulation(apiKey, 10);
+  console.log('=== Smart Money Accumulation (top buys by net_flow) ===\n');
+  const accumulating = await getSmartMoneyList(apiKey, 'desc', 10);
   for (const t of accumulating) {
     console.log(
-      `🟢 ${(t.symbol ?? t.address.slice(0, 8)).padEnd(12)} ` +
-      `| Net flow: ${formatUSD(t.netFlow)} ` +
-      `| Buyers: ${t.uniqueBuyers} wallets ` +
-      `| Buy vol: ${formatUSD(t.buyVolume)}`
+      `🟢 ${(t.symbol ?? t.token.slice(0, 8)).padEnd(12)} ` +
+      `| Net flow: ${formatUSD(t.net_flow)} ` +
+      `| Style: ${t.trader_style} (${t.smart_traders_no} wallets) ` +
+      `| Buy vol: ${formatUSD(t.volume_buy_usd)}`
     );
   }
 
-  console.log('\n=== Smart Money Distribution (top sells) ===\n');
-  const distributing = await getSmartMoneyDistribution(apiKey, 10);
+  console.log('\n=== Smart Money Distribution (top sells by net_flow) ===\n');
+  const distributing = await getSmartMoneyList(apiKey, 'asc', 10);
   for (const t of distributing) {
     console.log(
-      `🔴 ${(t.symbol ?? t.address.slice(0, 8)).padEnd(12)} ` +
-      `| Net flow: ${formatUSD(t.netFlow)} ` +
-      `| Sellers: ${t.uniqueSellers} wallets ` +
-      `| Sell vol: ${formatUSD(t.sellVolume)}`
+      `🔴 ${(t.symbol ?? t.token.slice(0, 8)).padEnd(12)} ` +
+      `| Net flow: ${formatUSD(t.net_flow)} ` +
+      `| Style: ${t.trader_style} (${t.smart_traders_no} wallets) ` +
+      `| Sell vol: ${formatUSD(t.volume_sell_usd)}`
     );
   }
-
-  console.log('\nCombine with birdeye-market-data for price/volume context.');
-  console.log('Combine with birdeye-holder-analysis for concentration risk.');
 }
 
 run().catch(console.error);

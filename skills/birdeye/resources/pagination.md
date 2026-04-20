@@ -45,7 +45,7 @@ async function paginate<T>(
 | `/smart-money/v1/token/list` | 100 | — |
 | `/defi/v2/tokens/new_listing` | — | No documented cap |
 | `/wallet/v2/current-net-worth` | 100 | Token list in portfolio |
-| `/v1/wallet/tx_list` | — | Use `before_time` to paginate |
+| `/v1/wallet/tx_list` | 100 | Pagination: `before` (tx hash cursor, Solana only) |
 
 ---
 
@@ -62,7 +62,8 @@ async function scrollAllTokens(apiKey: string): Promise<any[]> {
   let scrollId: string | undefined;
 
   while (true) {
-    const params = new URLSearchParams({ sort_by: 'volume24h', sort_type: 'desc', limit: '50' });
+    // Valid sort_by for /defi/v3/token/list/scroll: liquidity | fdv | market_cap | holder
+    const params = new URLSearchParams({ sort_by: 'liquidity', sort_type: 'desc', limit: '50' });
     if (scrollId) params.set('scroll_id', scrollId);
 
     const res = await fetch(`https://public-api.birdeye.so/defi/v3/token/list/scroll?${params}`, { headers });
@@ -82,9 +83,10 @@ async function scrollAllTokens(apiKey: string): Promise<any[]> {
 
 ## Pattern 3: time-based pagination
 
-Used by: `/defi/v3/token/txs`, `/defi/txs/token/seek_by_time`, `/trader/txs/seek_by_time`, `/v1/wallet/tx_list`
+Used by: `/defi/v3/token/txs`, `/defi/txs/token/seek_by_time`, `/trader/txs/seek_by_time`
 
-Use `before_time` / `after_time` (Unix seconds) to window queries:
+Use `before_time` / `after_time` (Unix seconds) to window queries.
+(Note: `/v1/wallet/tx_list` is NOT time-based — it uses a `before` tx-hash cursor, shown separately below.)
 
 ```typescript
 async function fetchAllTrades(
@@ -106,7 +108,8 @@ async function fetchAllTrades(
     all.push(...items);
 
     if (!json.data?.hasNext || items.length === 0) break;
-    before = items[items.length - 1].blockUnixTime - 1;
+    // /defi/v3/token/txs returns snake_case: use `block_unix_time`, not `blockUnixTime`.
+    before = items[items.length - 1].block_unix_time - 1;
   }
 
   return all;
@@ -115,7 +118,35 @@ async function fetchAllTrades(
 
 ---
 
-## Pattern 4: cursor (rare)
+## Pattern 4: tx-hash cursor (`/v1/wallet/tx_list`)
+
+`/v1/wallet/tx_list` paginates with a `before` param — the transaction hash of
+the last item from the previous page. Solana-only per official docs.
+
+```typescript
+async function fetchAllWalletTxs(apiKey: string, wallet: string): Promise<any[]> {
+  const headers = { 'X-API-KEY': apiKey, 'x-chain': 'solana', 'accept': 'application/json' };
+  const all: any[] = [];
+  let before: string | undefined;
+
+  while (true) {
+    const params = new URLSearchParams({ wallet, limit: '100' });
+    if (before) params.set('before', before);
+    const res = await fetch(`https://public-api.birdeye.so/v1/wallet/tx_list?${params}`, { headers });
+    const json = await res.json() as any;
+    const txs = json.data?.solana ?? [];   // response is chain-keyed
+    all.push(...txs);
+    if (txs.length < 100) break;
+    before = txs[txs.length - 1].txHash;
+  }
+
+  return all;
+}
+```
+
+---
+
+## Pattern 5: cursor (rare)
 
 Some newer/beta endpoints may use cursor-based pagination. Check response for a `cursor` field and pass it back in the next request's `cursor` param.
 
@@ -127,5 +158,6 @@ Some newer/beta endpoints may use cursor-based pagination. Check response for a 
 |---|---|---|
 | offset/limit | Most list endpoints | `offset`, `limit` → check `hasNext` or `total` |
 | scroll_id | `/defi/v3/token/list/scroll` | `scroll_id` from response (500 CU/call) |
-| time-based | Trade history, wallet tx_list | `before_time`, `after_time`, `limit` |
+| time-based | `/defi/v3/token/txs`, `/defi/txs/*/seek_by_time`, `/trader/txs/seek_by_time` | `before_time`, `after_time`, `limit` |
+| tx-hash cursor | `/v1/wallet/tx_list` | `before` (prev page's last `txHash`) — Solana only |
 | cursor | Some beta endpoints | `cursor` from response |
